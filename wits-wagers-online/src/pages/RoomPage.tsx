@@ -33,7 +33,20 @@ const LS_NAME = "ww:name";
 
 export function RoomPage() {
   const { roomId } = useParams();
-  const { room, players, answers, bets, roundId, setRoom, setPlayers, setAnswers, setBets, setRoundId } = useRoomStore();
+
+  const {
+    room,
+    players,
+    answers,
+    bets,
+    roundId,
+    setRoom,
+    setPlayers,
+    setAnswers,
+    setBets,
+    setRoundId,
+  } = useRoomStore();
+
   const [uid, setUid] = useState<string | null>(null);
 
   const [myName, setMyName] = useState(() => localStorage.getItem(LS_NAME) ?? "");
@@ -45,14 +58,16 @@ export function RoomPage() {
     { markerIndex: 1, slotId: "P2", stake: emptyStake() },
   ]);
 
+  // Auth + join room
   useEffect(() => {
     (async () => {
       const u = await ensureAnonAuth();
       setUid(u.uid);
       if (roomId) {
-        // upsert player
         const name = (localStorage.getItem(LS_NAME) ?? "Player").trim() || "Player";
-        await import("../services/roomApi").then(({ upsertPlayer }) => upsertPlayer(roomId, u.uid, name));
+        await import("../services/roomApi").then(({ upsertPlayer }) =>
+          upsertPlayer(roomId, u.uid, name)
+        );
       }
     })();
   }, [roomId]);
@@ -61,6 +76,7 @@ export function RoomPage() {
     return onAuth((u) => setUid(u?.uid ?? null));
   }, []);
 
+  // Room + player listeners
   useEffect(() => {
     if (!roomId) return;
     const unsubRoom = listenRoom(roomId, setRoom);
@@ -92,74 +108,74 @@ export function RoomPage() {
       unsubA?.();
       unsubB?.();
     };
-  }, [roomId, room?.roundIndex]);
+  }, [roomId, room?.roundIndex, setRoundId, setAnswers, setBets, room]);
 
-  // Update local name
+  // Persist local name
   useEffect(() => localStorage.setItem(LS_NAME, myName), [myName]);
 
   const me = useMemo(() => players.find((p) => p.uid === uid) ?? null, [players, uid]);
   const isHost = useMemo(() => !!(room && uid && room.hostUid === uid), [room, uid]);
 
+  // Solo bots
   useEffect(() => {
-  if (!roomId || !room || !isHost) return;
-  if (room.phase !== "LOBBY") return;
-
-  ensureSoloBots({ roomId, players, upsertBotPlayer }).catch(console.error);
-}, [roomId, room?.phase, isHost, players.length]);
+    if (!roomId || !room || !isHost) return;
+    if (room.phase !== "LOBBY") return;
+    ensureSoloBots({ roomId, players, upsertBotPlayer }).catch(console.error);
+  }, [roomId, room?.phase, isHost, players]);
 
   const arrangement = useMemo(() => arrangeAnswers(answers), [answers]);
 
   const myAnswer = useMemo(() => answers.find((a) => a.uid === uid)?.value ?? null, [answers, uid]);
-
   const myBetDoc = useMemo(() => bets.find((b) => b.uid === uid) ?? null, [bets, uid]);
 
-  // keep local bets in sync if server changes
+  // Keep local bets synced to server
   useEffect(() => {
     if (!myBetDoc) return;
     if ((myBetDoc.bets?.length ?? 0) > 0) setMyBetsLocal(myBetDoc.bets as any);
-  }, [myBetDoc?.updatedAt]);
+  }, [myBetDoc?.updatedAt, myBetDoc]);
 
   const roundQuestion = useMemo(() => {
     if (!room?.currentQuestion) return null;
     return room.currentQuestion;
-  }, [room?.currentQuestion?.id]);
+  }, [room?.currentQuestion?.id, room?.currentQuestion]);
 
   const correctAnswer = useMemo(() => {
     if (!roundQuestion) return null;
     const q = QUESTIONS.find((x) => x.id === roundQuestion.id);
     return q?.answer ?? null;
-  }, [roundQuestion?.id]);
+  }, [roundQuestion?.id, roundQuestion]);
 
+  // Bot play
   useEffect(() => {
-  if (!roomId || !room || !roundId || !isHost) return;
+    if (!roomId || !room || !roundId || !isHost) return;
 
-  const q = room.currentQuestion ? QUESTIONS.find((x) => x.id === room.currentQuestion!.id) : null;
-  const range = q?.botRange ?? [0, 100] as [number, number];
+    const q = room.currentQuestion ? QUESTIONS.find((x) => x.id === room.currentQuestion!.id) : null;
+    const range = q?.botRange ?? ([0, 100] as [number, number]);
 
-  if (room.phase === "ANSWERING") {
-    runBotsAnswering({
-      roomId,
-      roundId,
-      roundIndex: room.roundIndex,
-      players,
-      answers,
-      questionRange: range,
-      submitAnswer,
-    }).catch(console.error);
-  }
+    if (room.phase === "ANSWERING") {
+      runBotsAnswering({
+        roomId,
+        roundId,
+        roundIndex: room.roundIndex ?? 0,
+        players,
+        answers,
+        questionRange: range,
+        submitAnswer,
+      }).catch(console.error);
+    }
 
-  if (room.phase === "BETTING") {
-    runBotsBetting({
-      roomId,
-      roundId,
-      roundIndex: room.roundIndex,
-      players,
-      bets,
-      arrangementSlots: arrangement.slots,
-      upsertBets,
-    }).catch(console.error);
-  }
-}, [roomId, room?.phase, roundId, isHost, room?.roundIndex, players, answers, bets, arrangement]);
+    if (room.phase === "BETTING") {
+      runBotsBetting({
+        roomId,
+        roundId,
+        roundIndex: room.roundIndex ?? 0,
+        players,
+        bets,
+        arrangementSlots: arrangement.slots,
+        upsertBets,
+      }).catch(console.error);
+    }
+  }, [roomId, room, roundId, isHost, players, answers, bets, arrangement]);
 
   const allAnswered = useMemo(() => {
     if (!players.length) return false;
@@ -169,23 +185,75 @@ export function RoomPage() {
 
   const canBetWithPokerChips = useMemo(() => (room?.roundIndex ?? 0) >= 1, [room?.roundIndex]);
 
+  // Phase UI metadata (no hooks)
+  const PHASE_ORDER = ["LOBBY", "QUESTION", "ANSWERING", "ARRANGE", "BETTING", "REVEAL", "PAYOUT", "ENDED"] as const;
+
+  const PHASE_META: Record<
+    string,
+    { title: string; subtitle: string; intent: "idle" | "think" | "act" | "resolve" }
+  > = {
+    LOBBY: { title: "Lobby", subtitle: "Get ready — host will start the next question.", intent: "idle" },
+    QUESTION: { title: "Question", subtitle: "Read the prompt and think of a number.", intent: "think" },
+    ANSWERING: { title: "Submit Answer", subtitle: "Enter your best guess (hidden until reveal).", intent: "act" },
+    ARRANGE: { title: "Arrange", subtitle: "Answers are being placed on the mat.", intent: "idle" },
+    BETTING: { title: "Betting", subtitle: "Place two markers, then add chips if available.", intent: "act" },
+    REVEAL: { title: "Reveal", subtitle: "Correct answer revealed — see the winning slot.", intent: "resolve" },
+    PAYOUT: { title: "Payout", subtitle: "Wallets updated — next round soon.", intent: "resolve" },
+    ENDED: { title: "Game Over", subtitle: "Highest points wins.", intent: "resolve" },
+  };
+
+  function Stepper({ phase }: { phase: string }) {
+    const idx = Math.max(0, PHASE_ORDER.indexOf(phase as any));
+    return (
+      <div className="stepper">
+        {PHASE_ORDER.map((p, i) => (
+          <div key={p} className={`step ${i < idx ? "done" : ""} ${i === idx ? "active" : ""}`}>
+            <div className="dot" />
+            <div className="label">{p}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   const phaseLabel = room?.phase ?? "…";
 
+  // Early returns (NO hooks below this point)
   if (!roomId) return <div className="card">Missing room id.</div>;
   if (!room) return <div className="card">Loading room…</div>;
   if (!uid) return <div className="card">Authenticating…</div>;
 
+  // Computed values (no hooks) — safe below early returns
+  const phase = room.phase;
+  const meta = PHASE_META[phase] ?? { title: phaseLabel, subtitle: "", intent: "idle" };
+
+  const answeredCount = (() => {
+    const uids = new Set(answers.map((a) => a.uid));
+    return players.reduce((acc, p) => acc + (uids.has(p.uid) ? 1 : 0), 0);
+  })();
+
+  const betCount = (() => {
+    const uids = new Set(bets.map((b) => b.uid));
+    return players.reduce((acc, p) => acc + (uids.has(p.uid) ? 1 : 0), 0);
+  })();
+
+  const myBetsSaved = (myBetDoc?.bets?.length ?? 0) > 0;
+
   async function hostStartRound() {
+    if (!room || !roomId) return;
     const q = QUESTIONS[room.roundIndex % QUESTIONS.length];
+    if (!q?.id || !q?.prompt) throw new Error("Question is missing id or prompt");
+
     await hostSetQuestion(roomId, { id: q.id, prompt: q.prompt, unit: q.unit });
     await hostSetPhase(roomId, "QUESTION", Date.now() + 20_000);
-    // then allow answering
+
     setTimeout(async () => {
       await hostSetPhase(roomId, "ANSWERING", Date.now() + 35_000);
     }, 400);
   }
 
   async function hostArrangeAndBet() {
+    if (!roomId) return;
     await hostSetPhase(roomId, "ARRANGE", Date.now() + 5_000);
     setTimeout(async () => {
       await hostSetPhase(roomId, "BETTING", Date.now() + 35_000);
@@ -193,12 +261,15 @@ export function RoomPage() {
   }
 
   async function hostRevealAndPayout() {
+    if (!roomId) return;
     if (!correctAnswer) return;
+
     const { winningSlotId, winningGuessUid } = computeWinning(answers, correctAnswer, arrangement);
+
     await hostSetReveal(roomId, { correctAnswer, winningGuessUid, winningSlotId });
     await hostSetPhase(roomId, "REVEAL", Date.now() + 10_000);
 
-    // apply payouts (host-authoritative MVP)
+    // Host-authoritative MVP payout
     const wallets = Object.fromEntries(players.map((p) => [p.uid, p.wallet]));
     const res = applyPayout({
       wallets,
@@ -209,23 +280,27 @@ export function RoomPage() {
     });
 
     await batchUpdateWallets(roomId, res.updatedWallets);
-
     await hostSetPhase(roomId, "PAYOUT", Date.now() + 12_000);
 
     setTimeout(async () => {
-      const nextRound = room.roundIndex + 1;
+      const nextRound = (room.roundIndex ?? 0) + 1;
       if (nextRound >= room.settings.totalRounds) {
         await hostSetPhase(roomId, "ENDED", null);
         return;
       }
-      await updateDoc(roomDoc(roomId), { roundIndex: nextRound, currentQuestion: null, revealed: null });
+
+      await updateDoc(roomDoc(roomId), {
+        roundIndex: nextRound,
+        currentQuestion: null,
+        revealed: null,
+      });
+
       await hostSetPhase(roomId, "LOBBY", null);
     }, 600);
   }
 
   async function saveMyBets() {
     if (!roundId) return;
-    // if round 1, force stake=0
     const cleaned = myBetsLocal.map((b) => ({
       ...b,
       stake: canBetWithPokerChips ? b.stake : { red: 0, blue: 0, green: 0 },
@@ -234,103 +309,83 @@ export function RoomPage() {
   }
 
   function setMarkerSlot(markerIndex: 0 | 1, slotId: SlotId) {
-    setMyBetsLocal((prev) => prev.map((b) => (b.markerIndex === markerIndex ? { ...b, slotId } : b)));
+    setMyBetsLocal((prev) =>
+      prev.map((b) => (b.markerIndex === markerIndex ? { ...b, slotId } : b))
+    );
   }
 
   function setMarkerStake(markerIndex: 0 | 1, stake: { red: number; blue: number; green: number }) {
-    setMyBetsLocal((prev) => prev.map((b) => (b.markerIndex === markerIndex ? { ...b, stake } : b)));
+    setMyBetsLocal((prev) =>
+      prev.map((b) => (b.markerIndex === markerIndex ? { ...b, stake } : b))
+    );
   }
 
   return (
-    <div className="grid2">
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>Room</h2>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <div className="row">
-            <span className="badge">Code: <strong>{roomId}</strong></span>
-            <span className="badge">Phase: <strong>{phaseLabel}</strong></span>
-            <span className="badge">Round: <strong>{room.roundIndex + 1}/{room.settings.totalRounds}</strong></span>
-          </div>
-        </div>
-
-        <div className="spacer" />
-        <TimerBar endsAtMs={room.phaseEndsAt ?? null} />
-
-        <div className="spacer" />
-        <div className="card" style={{ padding: 12 }}>
-          <h3 style={{ marginTop: 0 }}>Players ({players.length}/{room.settings.maxPlayers})</h3>
-          <div className="row" style={{ gap: 8 }}>
-            {players.map((p) => (
-              <span key={p.uid} className="pill" title={p.uid}>
-                {p.uid === room.hostUid ? "👑 " : ""}
-                {p.name}
-                <span className="muted">· {walletToPoints(p.wallet)} pts</span>
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="spacer" />
-
-        <div className="card" style={{ padding: 12 }}>
-          <h3 style={{ marginTop: 0 }}>Your name</h3>
-          <div className="row">
-            <input value={myName} onChange={(e) => setMyName(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
-            <button
-              onClick={async () => {
-                localStorage.setItem(LS_NAME, myName);
-                await import("../services/roomApi").then(({ upsertPlayer }) => upsertPlayer(roomId, uid, myName.trim() || "Player"));
-              }}
-            >
-              Update
-            </button>
-          </div>
-        </div>
-
-        <div className="spacer" />
-
-        {/* Phase UI */}
-        {room.phase === "LOBBY" && (
-          <div className="card" style={{ padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Lobby</h3>
-            <div className="muted" style={{ fontSize: 12 }}>
-              Host: start the next question when everyone is ready.
+    <div className="roomLayout">
+      {/* MAIN */}
+      <div className="mainCol">
+        <div className={`phaseBanner intent-${meta.intent}`}>
+          <div className="phaseBannerTop">
+            <div>
+              <div className="phaseTitle">{meta.title}</div>
+              <div className="phaseSubtitle">{meta.subtitle}</div>
             </div>
-            <div className="spacer" />
-            <button className="primary" disabled={!isHost || players.length < 3} onClick={hostStartRound}>
-              Start round
-            </button>
-            {players.length < 3 && <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>Need at least 3 players.</div>}
+
+            <div className="phaseBadges">
+              <span className="badge">Code: <strong>{roomId}</strong></span>
+              <span className="badge">Round: <strong>{room.roundIndex + 1}/{room.settings.totalRounds}</strong></span>
+              <span className="badge">Answered: <strong>{answeredCount}/{players.length}</strong></span>
+              <span className="badge">Bets: <strong>{betCount}/{players.length}</strong></span>
+            </div>
+          </div>
+
+          <TimerBar endsAtMs={room.phaseEndsAt ?? null} />
+          <Stepper phase={phase} />
+        </div>
+
+        <div className="panel">
+          <div className="panelHeader">
+            <h3>Question</h3>
+            {roundQuestion?.unit && <span className="muted">Unit: {roundQuestion.unit}</span>}
+          </div>
+
+          {roundQuestion ? (
+            <div className="questionText">{roundQuestion.prompt}</div>
+          ) : (
+            <div className="muted">Waiting for host to choose a question…</div>
+          )}
+        </div>
+
+        {phase === "LOBBY" && (
+          <div className="panel callout">
+            <h3>Ready?</h3>
+            <div className="muted">Host starts when everyone is in.</div>
+            <div className="ctaRow">
+              <button className="primary" disabled={!isHost || players.length < 3} onClick={hostStartRound}>
+                Start round
+              </button>
+              {!isHost && <span className="muted">Waiting for host…</span>}
+            </div>
+            {isHost && players.length < 3 && <div className="muted small">Need at least 3 players (bots will fill if solo).</div>}
           </div>
         )}
 
-        {room.phase === "QUESTION" && (
-          <div className="card" style={{ padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Question</h3>
-            {roundQuestion ? (
-              <>
-                <div style={{ fontSize: 16, fontWeight: 700 }}>{roundQuestion.prompt}</div>
-                {roundQuestion.unit && <div className="muted" style={{ marginTop: 6 }}>Unit: {roundQuestion.unit}</div>}
-                <div className="spacer" />
-                <div className="muted" style={{ fontSize: 12 }}>
-                  Think of a number. You’ll submit privately next.
-                </div>
-              </>
-            ) : (
-              <div className="muted">Waiting for host…</div>
-            )}
+        {phase === "QUESTION" && (
+          <div className="panel callout">
+            <h3>Think of a number</h3>
+            <div className="muted">You’ll submit privately when the timer advances.</div>
           </div>
         )}
 
-        {room.phase === "ANSWERING" && (
-          <div className="card" style={{ padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Submit your answer</h3>
-            <div className="row">
+        {phase === "ANSWERING" && (
+          <div className="panel callout">
+            <h3>Submit your answer</h3>
+            <div className="ctaRow">
               <input
                 type="number"
                 value={answerValue}
                 onChange={(e) => setAnswerValue(Number(e.target.value))}
-                style={{ width: 200 }}
+                className="answerInput"
               />
               <button
                 className="primary"
@@ -342,67 +397,73 @@ export function RoomPage() {
               >
                 Submit
               </button>
-            </div>
-            {myAnswer != null && <div className="muted" style={{ marginTop: 8 }}>Submitted: <strong>{myAnswer}</strong></div>}
 
-            <div className="spacer" />
+              {myAnswer != null && (
+                <span className="statusPill ok">
+                  Submitted: <strong>{myAnswer}</strong>
+                </span>
+              )}
+            </div>
+
             {isHost && (
-              <button disabled={!allAnswered} onClick={hostArrangeAndBet}>
-                Arrange &amp; start betting
-              </button>
-            )}
-            {isHost && !allAnswered && (
-              <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-                Waiting for everyone to answer…
+              <div className="hostRow">
+                <button disabled={!allAnswered} onClick={hostArrangeAndBet}>
+                  Arrange &amp; start betting
+                </button>
+                {!allAnswered && <span className="muted small">Waiting for everyone…</span>}
               </div>
             )}
           </div>
         )}
 
-        {room.phase === "ARRANGE" && (
-          <div className="card" style={{ padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Arranging answers…</h3>
-            <div className="muted">Answers are now visible on the betting mat.</div>
+        {phase === "ARRANGE" && (
+          <div className="panel callout">
+            <h3>Arranging answers…</h3>
+            <div className="muted">Answers are being placed onto the mat.</div>
           </div>
         )}
 
-        {room.phase === "BETTING" && (
-          <div className="card" style={{ padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Place your bets</h3>
-            <div className="muted" style={{ fontSize: 12 }}>
-              You have <strong>two markers</strong>. Each marker counts as +1 stake automatically. {canBetWithPokerChips ? "You can add poker chips too." : "Round 1: no poker chips yet."}
+        {phase === "BETTING" && (
+          <div className="panel callout">
+            <div className="panelHeader">
+              <h3>Place your bets</h3>
+              <span className="muted small">
+                Two markers. {canBetWithPokerChips ? "Poker chips enabled." : "Round 1: markers only."}
+              </span>
             </div>
 
-            <div className="spacer" />
-            <div className="row">
-              <span className="pill">Select marker</span>
-              <button onClick={() => setSelectedMarkerIndex(0)} className={selectedMarkerIndex === 0 ? "primary" : ""}>
-                Marker 1
-              </button>
-              <button onClick={() => setSelectedMarkerIndex(1)} className={selectedMarkerIndex === 1 ? "primary" : ""}>
-                Marker 2
-              </button>
-              <button onClick={saveMyBets}>Save bets</button>
+            <div className="ctaRow">
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <span className="muted small">Active marker:</span>
+                <button onClick={() => setSelectedMarkerIndex(0)} className={selectedMarkerIndex === 0 ? "primary" : ""}>
+                  Marker 1
+                </button>
+                <button onClick={() => setSelectedMarkerIndex(1)} className={selectedMarkerIndex === 1 ? "primary" : ""}>
+                  Marker 2
+                </button>
+                <button onClick={saveMyBets} className={myBetsSaved ? "good" : ""}>
+                  {myBetsSaved ? "Bets saved ✓" : "Save bets"}
+                </button>
+              </div>
+
+              {isHost && (
+                <button className="primary" onClick={hostRevealAndPayout} disabled={!correctAnswer}>
+                  Reveal &amp; payout
+                </button>
+              )}
             </div>
 
-            <div className="spacer" />
             {me && (
-              <>
-                <div className="chips">
-                  <span className="chip">Wallet: {walletToPoints(me.wallet)} pts</span>
-                  <span className="chip">red {me.wallet.red}</span>
-                  <span className="chip">blue {me.wallet.blue}</span>
-                  <span className="chip">green {me.wallet.green}</span>
-                </div>
-
-                <div className="spacer" />
+              <div className="betEditorGrid">
                 {myBetsLocal.map((b) => (
-                  <div key={b.markerIndex} className="card" style={{ padding: 12 }}>
-                    <div className="row" style={{ justifyContent: "space-between" }}>
+                  <div
+                    key={b.markerIndex}
+                    className={`miniPanel ${selectedMarkerIndex === b.markerIndex ? "active" : ""}`}
+                  >
+                    <div className="miniHeader">
                       <strong>Marker {b.markerIndex + 1}</strong>
-                      <span className="muted">Slot: {b.slotId}</span>
+                      <span className="muted small">Slot: {b.slotId}</span>
                     </div>
-                    <div className="spacer" />
                     <ChipSelector
                       wallet={me.wallet}
                       value={b.stake}
@@ -411,27 +472,40 @@ export function RoomPage() {
                     />
                   </div>
                 ))}
-              </>
-            )}
-
-            <div className="spacer" />
-            {isHost && (
-              <button className="primary" onClick={hostRevealAndPayout} disabled={!correctAnswer}>
-                Reveal answer &amp; pay out
-              </button>
+              </div>
             )}
           </div>
         )}
 
-        {room.phase === "REVEAL" && (
-          <div className="card" style={{ padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Reveal</h3>
+        {(phase === "ARRANGE" || phase === "BETTING" || phase === "REVEAL" || phase === "PAYOUT" || phase === "ENDED") && (
+          <div className="panel">
+            <div className="panelHeader">
+              <h3>Betting Mat</h3>
+              <span className="muted small">{phase === "BETTING" ? "Tap a slot to place marker" : "Preview"}</span>
+            </div>
+
+            <div className={`matWrap ${phase !== "BETTING" ? "disabled" : ""}`}>
+              <BettingMat
+                arrangement={arrangement}
+                bets={bets}
+                players={players}
+                meUid={uid}
+                selectedMarkerIndex={selectedMarkerIndex}
+                onPickSlot={phase === "BETTING" ? setMarkerSlot : undefined}
+                winningSlotId={(room.revealed?.winningSlotId as SlotId | null) ?? null}
+              />
+              {phase !== "BETTING" && <div className="matOverlay">Betting opens in the BETTING phase</div>}
+            </div>
+          </div>
+        )}
+
+        {(phase === "REVEAL" || phase === "PAYOUT" || phase === "ENDED") && (
+          <div className="panel callout">
+            <h3>{phase === "REVEAL" ? "Reveal" : phase === "PAYOUT" ? "Payout" : "Game Over"}</h3>
             {room.revealed ? (
               <>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>
-                  Correct answer: {room.revealed.correctAnswer}
-                </div>
-                <div className="muted" style={{ marginTop: 6 }}>
+                <div className="bigNumber">Correct: {room.revealed.correctAnswer}</div>
+                <div className="muted">
                   Winning slot: <strong>{room.revealed.winningSlotId ?? "—"}</strong>
                 </div>
               </>
@@ -440,44 +514,63 @@ export function RoomPage() {
             )}
           </div>
         )}
-
-        {room.phase === "PAYOUT" && (
-          <div className="card" style={{ padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Payout</h3>
-            <div className="muted">Scores updated. Next round starting soon…</div>
-          </div>
-        )}
-
-        {room.phase === "ENDED" && (
-          <div className="card" style={{ padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Game over</h3>
-            <div className="muted">Winner is whoever has the most points.</div>
-          </div>
-        )}
       </div>
 
-      {/* Right column: Betting mat always visible once answers exist */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {(room.phase === "ARRANGE" || room.phase === "BETTING" || room.phase === "REVEAL" || room.phase === "PAYOUT" || room.phase === "ENDED") && (
-          <BettingMat
-            arrangement={arrangement}
-            bets={bets}
-            players={players}
-            meUid={uid}
-            selectedMarkerIndex={selectedMarkerIndex}
-            onPickSlot={room.phase === "BETTING" ? setMarkerSlot : undefined}
-            winningSlotId={(room.revealed?.winningSlotId as SlotId | null) ?? null}
-          />
-        )}
+      {/* SIDEBAR */}
+      <div className="sideCol">
+        <div className="panel">
+          <div className="panelHeader">
+            <h3>Players</h3>
+            <span className="muted small">{players.length}/{room.settings.maxPlayers}</span>
+          </div>
 
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>How to play (digital)</h3>
-          <ol className="muted" style={{ marginTop: 0, paddingLeft: 18, fontSize: 13 }}>
-            <li>Answer a numeric trivia question.</li>
-            <li>Answers are sorted onto the mat.</li>
-            <li>Place up to two bets. Each marker counts as +1 stake.</li>
-            <li>From Round 2+, add poker chips under markers to increase winnings.</li>
-            <li>Winning guess = closest without going over; if all are over, “All too high” wins.</li>
+          <div className="playerList">
+            {players.map((p) => (
+              <div key={p.uid} className={`playerRow ${p.uid === uid ? "me" : ""}`}>
+                <div className="playerName">
+                  {p.uid === room.hostUid ? "👑 " : ""}
+                  {p.isBot ? "🤖 " : ""}
+                  {p.name}
+                </div>
+                <div className="playerPts">{walletToPoints(p.wallet)} pts</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>Your profile</h3>
+          <div className="ctaRow">
+            <input value={myName} onChange={(e) => setMyName(e.target.value)} />
+            <button
+              onClick={async () => {
+                localStorage.setItem(LS_NAME, myName);
+                await import("../services/roomApi").then(({ upsertPlayer }) =>
+                  upsertPlayer(roomId, uid, myName.trim() || "Player")
+                );
+              }}
+            >
+              Update
+            </button>
+          </div>
+
+          <div className="statusStack">
+            <span className={`statusPill ${myAnswer != null ? "ok" : ""}`}>
+              {myAnswer != null ? "Answer submitted ✓" : "No answer yet"}
+            </span>
+            <span className={`statusPill ${myBetsSaved ? "ok" : ""}`}>
+              {myBetsSaved ? "Bets saved ✓" : "No bets saved"}
+            </span>
+          </div>
+        </div>
+
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>How to play</h3>
+          <ol className="muted small" style={{ marginTop: 0, paddingLeft: 18 }}>
+            <li>Answer a numeric question.</li>
+            <li>Answers sort onto the mat.</li>
+            <li>Place two markers; add chips from Round 2+.</li>
+            <li>Closest without going over wins (or “All too high”).</li>
           </ol>
         </div>
       </div>
