@@ -1,7 +1,9 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
-// https://vite.dev/config/
+// GitHub Pages repo: https://github.com/swimgirlnv/trivia
+// Pages base path is /trivia/ (repo name).
 export default defineConfig({
+  base: "/trivia/",
   plugins: [react()],
-})
+});

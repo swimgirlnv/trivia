@@ -1,35 +1,29 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { HashRouter, Route, Routes, Navigate } from "react-router-dom";
+import { HomePage } from "./pages/HomePage";
+import { RoomPage } from "./pages/RoomPage";
 
-function App() {
-  const [count, setCount] = useState(0)
-
+export function App() {
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
-}
+    <HashRouter>
+      <div className="container">
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h1 style={{ margin: 0, fontSize: 22 }}>Wits &amp; Wagers Online</h1>
+          <span className="badge">Max 10 players · realtime</span>
+        </div>
 
-export default App
+        <div className="spacer" />
+
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/room/:roomId" element={<RoomPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+
+        <div className="spacer" />
+        <div className="muted" style={{ fontSize: 12 }}>
+          Built for GitHub Pages + Firebase (Firestore). This is a fan-made project inspired by the board game.
+        </div>
+      </div>
+    </HashRouter>
+  );
+}

@@ -1,23 +1,30 @@
-// TimerBar UI component
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from "react";
 
-const TimerBar = ({ duration, onComplete }: { duration: number; onComplete: () => void }) => {
-  const [timeLeft, setTimeLeft] = useState(duration);
+export function TimerBar(props: { endsAtMs: number | null | undefined; nowMs?: number }) {
+  const { endsAtMs } = props;
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (timeLeft <= 0) {
-      onComplete();
-      return;
-    }
-    const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [timeLeft, onComplete]);
+    const t = setInterval(() => setNow(Date.now()), 200);
+    return () => clearInterval(t);
+  }, []);
+
+  const { pct, secondsLeft } = useMemo(() => {
+    if (!endsAtMs) return { pct: 0, secondsLeft: null as number | null };
+    const left = Math.max(0, endsAtMs - now);
+    const secondsLeft = Math.ceil(left / 1000);
+    // assume phases are ~30-60s; use 60s window for a smooth bar
+    const windowMs = 60_000;
+    const pct = Math.max(0, Math.min(100, (left / windowMs) * 100));
+    return { pct, secondsLeft };
+  }, [endsAtMs, now]);
 
   return (
-    <div className="timer-bar">
-      <div style={{ width: `${(timeLeft / duration) * 100}%` }} className="timer-bar-inner" />
+    <div>
+      <div className="timer">
+        <div style={{ width: `${pct}%` }} />
+      </div>
+      {secondsLeft != null && <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>⏳ {secondsLeft}s</div>}
     </div>
   );
-};
-
-export default TimerBar;
+}
