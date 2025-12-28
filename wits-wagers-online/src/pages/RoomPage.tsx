@@ -63,11 +63,11 @@ export function RoomPage() {
     (async () => {
       const u = await ensureAnonAuth();
       setUid(u.uid);
+
       if (roomId) {
         const name = (localStorage.getItem(LS_NAME) ?? "Player").trim() || "Player";
-        await import("../services/roomApi").then(({ upsertPlayer }) =>
-          upsertPlayer(roomId, u.uid, name)
-        );
+        const { upsertPlayer } = await import("../services/roomApi");
+        await upsertPlayer(roomId, u.uid, name);
       }
     })();
   }, [roomId]);
@@ -185,22 +185,19 @@ export function RoomPage() {
 
   const canBetWithPokerChips = useMemo(() => (room?.roundIndex ?? 0) >= 1, [room?.roundIndex]);
 
-  // Phase UI metadata (no hooks)
   const PHASE_ORDER = ["LOBBY", "QUESTION", "ANSWERING", "ARRANGE", "BETTING", "REVEAL", "PAYOUT", "ENDED"] as const;
 
-  const PHASE_META: Record<
-    string,
-    { title: string; subtitle: string; intent: "idle" | "think" | "act" | "resolve" }
-  > = {
-    LOBBY: { title: "Lobby", subtitle: "Get ready — host will start the next question.", intent: "idle" },
-    QUESTION: { title: "Question", subtitle: "Read the prompt and think of a number.", intent: "think" },
-    ANSWERING: { title: "Submit Answer", subtitle: "Enter your best guess (hidden until reveal).", intent: "act" },
-    ARRANGE: { title: "Arrange", subtitle: "Answers are being placed on the mat.", intent: "idle" },
-    BETTING: { title: "Betting", subtitle: "Place two markers, then add chips if available.", intent: "act" },
-    REVEAL: { title: "Reveal", subtitle: "Correct answer revealed — see the winning slot.", intent: "resolve" },
-    PAYOUT: { title: "Payout", subtitle: "Wallets updated — next round soon.", intent: "resolve" },
-    ENDED: { title: "Game Over", subtitle: "Highest points wins.", intent: "resolve" },
-  };
+  const PHASE_META: Record<string, { title: string; subtitle: string; intent: "idle" | "think" | "act" | "resolve" }> =
+    {
+      LOBBY: { title: "Lobby", subtitle: "Get ready — host will start the next question.", intent: "idle" },
+      QUESTION: { title: "Question", subtitle: "Read the prompt and think of a number.", intent: "think" },
+      ANSWERING: { title: "Submit Answer", subtitle: "Enter your best guess (hidden until reveal).", intent: "act" },
+      ARRANGE: { title: "Arrange", subtitle: "Answers are being placed on the mat.", intent: "idle" },
+      BETTING: { title: "Betting", subtitle: "Place two markers, then add chips if available.", intent: "act" },
+      REVEAL: { title: "Reveal", subtitle: "Correct answer revealed — see the winning slot.", intent: "resolve" },
+      PAYOUT: { title: "Payout", subtitle: "Wallets updated — next round soon.", intent: "resolve" },
+      ENDED: { title: "Game Over", subtitle: "Highest points wins.", intent: "resolve" },
+    };
 
   function Stepper({ phase }: { phase: string }) {
     const idx = Math.max(0, PHASE_ORDER.indexOf(phase as any));
@@ -223,7 +220,11 @@ export function RoomPage() {
   if (!room) return <div className="card">Loading room…</div>;
   if (!uid) return <div className="card">Authenticating…</div>;
 
-  // Computed values (no hooks) — safe below early returns
+  // Capture as non-null strings so TS is happy inside closures/handlers
+  const roomIdStr: string = roomId;
+  const uidStr: string = uid;
+
+  // Computed values (no hooks)
   const phase = room.phase;
   const meta = PHASE_META[phase] ?? { title: phaseLabel, subtitle: "", intent: "idle" };
 
@@ -240,89 +241,91 @@ export function RoomPage() {
   const myBetsSaved = (myBetDoc?.bets?.length ?? 0) > 0;
 
   async function hostStartRound() {
-    if (!room || !roomId) return;
-    const q = QUESTIONS[room.roundIndex % QUESTIONS.length];
+    const r = room; // capture
+    if (!r) return;
+
+    const q = QUESTIONS[r.roundIndex % QUESTIONS.length];
     if (!q?.id || !q?.prompt) throw new Error("Question is missing id or prompt");
 
-    await hostSetQuestion(roomId, { id: q.id, prompt: q.prompt, unit: q.unit });
-    await hostSetPhase(roomId, "QUESTION", Date.now() + 20_000);
+    await hostSetQuestion(roomIdStr, { id: q.id, prompt: q.prompt, unit: q.unit });
+    await hostSetPhase(roomIdStr, "QUESTION", Date.now() + 20_000);
 
     setTimeout(async () => {
-      await hostSetPhase(roomId, "ANSWERING", Date.now() + 35_000);
+      await hostSetPhase(roomIdStr, "ANSWERING", Date.now() + 35_000);
     }, 400);
   }
 
   async function hostArrangeAndBet() {
-    if (!roomId) return;
-    await hostSetPhase(roomId, "ARRANGE", Date.now() + 5_000);
+    await hostSetPhase(roomIdStr, "ARRANGE", Date.now() + 5_000);
     setTimeout(async () => {
-      await hostSetPhase(roomId, "BETTING", Date.now() + 35_000);
+      await hostSetPhase(roomIdStr, "BETTING", Date.now() + 35_000);
     }, 300);
   }
 
   async function hostRevealAndPayout() {
-    if (!roomId) return;
+    const r = room; // capture
+    if (!r) return;
     if (!correctAnswer) return;
+
+    const roundIndexNow = r.roundIndex;
+    const totalRounds = r.settings.totalRounds;
 
     const { winningSlotId, winningGuessUid } = computeWinning(answers, correctAnswer, arrangement);
 
-    await hostSetReveal(roomId, { correctAnswer, winningGuessUid, winningSlotId });
-    await hostSetPhase(roomId, "REVEAL", Date.now() + 10_000);
+    await hostSetReveal(roomIdStr, { correctAnswer, winningGuessUid, winningSlotId });
+    await hostSetPhase(roomIdStr, "REVEAL", Date.now() + 10_000);
 
-    // Host-authoritative MVP payout
     const wallets = Object.fromEntries(players.map((p) => [p.uid, p.wallet]));
     const res = applyPayout({
       wallets,
       bets,
       winningSlotId,
       winningGuessUid,
-      roundIndex: room.roundIndex,
+      roundIndex: roundIndexNow,
     });
 
-    await batchUpdateWallets(roomId, res.updatedWallets);
-    await hostSetPhase(roomId, "PAYOUT", Date.now() + 12_000);
+    await batchUpdateWallets(roomIdStr, res.updatedWallets);
+    await hostSetPhase(roomIdStr, "PAYOUT", Date.now() + 12_000);
 
     setTimeout(async () => {
-      const nextRound = (room.roundIndex ?? 0) + 1;
-      if (nextRound >= room.settings.totalRounds) {
-        await hostSetPhase(roomId, "ENDED", null);
+      const nextRound = roundIndexNow + 1;
+
+      if (nextRound >= totalRounds) {
+        await hostSetPhase(roomIdStr, "ENDED", null);
         return;
       }
 
-      await updateDoc(roomDoc(roomId), {
+      await updateDoc(roomDoc(roomIdStr), {
         roundIndex: nextRound,
         currentQuestion: null,
         revealed: null,
       });
 
-      await hostSetPhase(roomId, "LOBBY", null);
+      await hostSetPhase(roomIdStr, "LOBBY", null);
     }, 600);
   }
 
   async function saveMyBets() {
     if (!roundId) return;
+
     const cleaned = myBetsLocal.map((b) => ({
       ...b,
       stake: canBetWithPokerChips ? b.stake : { red: 0, blue: 0, green: 0 },
     }));
-    await upsertBets(roomId, roundId, uid, cleaned);
+
+    await upsertBets(roomIdStr, roundId, uidStr, cleaned);
   }
 
   function setMarkerSlot(markerIndex: 0 | 1, slotId: SlotId) {
-    setMyBetsLocal((prev) =>
-      prev.map((b) => (b.markerIndex === markerIndex ? { ...b, slotId } : b))
-    );
+    setMyBetsLocal((prev) => prev.map((b) => (b.markerIndex === markerIndex ? { ...b, slotId } : b)));
   }
 
   function setMarkerStake(markerIndex: 0 | 1, stake: { red: number; blue: number; green: number }) {
-    setMyBetsLocal((prev) =>
-      prev.map((b) => (b.markerIndex === markerIndex ? { ...b, stake } : b))
-    );
+    setMyBetsLocal((prev) => prev.map((b) => (b.markerIndex === markerIndex ? { ...b, stake } : b)));
   }
 
   return (
     <div className="roomLayout">
-      {/* MAIN */}
       <div className="mainCol">
         <div className={`phaseBanner intent-${meta.intent}`}>
           <div className="phaseBannerTop">
@@ -332,7 +335,7 @@ export function RoomPage() {
             </div>
 
             <div className="phaseBadges">
-              <span className="badge">Code: <strong>{roomId}</strong></span>
+              <span className="badge">Code: <strong>{roomIdStr}</strong></span>
               <span className="badge">Round: <strong>{room.roundIndex + 1}/{room.settings.totalRounds}</strong></span>
               <span className="badge">Answered: <strong>{answeredCount}/{players.length}</strong></span>
               <span className="badge">Bets: <strong>{betCount}/{players.length}</strong></span>
@@ -392,7 +395,7 @@ export function RoomPage() {
                 disabled={!roundId}
                 onClick={async () => {
                   if (!roundId) return;
-                  await submitAnswer(roomId, roundId, uid, answerValue);
+                  await submitAnswer(roomIdStr, roundId, uidStr, answerValue);
                 }}
               >
                 Submit
@@ -456,10 +459,7 @@ export function RoomPage() {
             {me && (
               <div className="betEditorGrid">
                 {myBetsLocal.map((b) => (
-                  <div
-                    key={b.markerIndex}
-                    className={`miniPanel ${selectedMarkerIndex === b.markerIndex ? "active" : ""}`}
-                  >
+                  <div key={b.markerIndex} className={`miniPanel ${selectedMarkerIndex === b.markerIndex ? "active" : ""}`}>
                     <div className="miniHeader">
                       <strong>Marker {b.markerIndex + 1}</strong>
                       <span className="muted small">Slot: {b.slotId}</span>
@@ -489,7 +489,7 @@ export function RoomPage() {
                 arrangement={arrangement}
                 bets={bets}
                 players={players}
-                meUid={uid}
+                meUid={uidStr}
                 selectedMarkerIndex={selectedMarkerIndex}
                 onPickSlot={phase === "BETTING" ? setMarkerSlot : undefined}
                 winningSlotId={(room.revealed?.winningSlotId as SlotId | null) ?? null}
@@ -516,7 +516,6 @@ export function RoomPage() {
         )}
       </div>
 
-      {/* SIDEBAR */}
       <div className="sideCol">
         <div className="panel">
           <div className="panelHeader">
@@ -526,7 +525,7 @@ export function RoomPage() {
 
           <div className="playerList">
             {players.map((p) => (
-              <div key={p.uid} className={`playerRow ${p.uid === uid ? "me" : ""}`}>
+              <div key={p.uid} className={`playerRow ${p.uid === uidStr ? "me" : ""}`}>
                 <div className="playerName">
                   {p.uid === room.hostUid ? "👑 " : ""}
                   {p.isBot ? "🤖 " : ""}
@@ -545,9 +544,8 @@ export function RoomPage() {
             <button
               onClick={async () => {
                 localStorage.setItem(LS_NAME, myName);
-                await import("../services/roomApi").then(({ upsertPlayer }) =>
-                  upsertPlayer(roomId, uid, myName.trim() || "Player")
-                );
+                const { upsertPlayer } = await import("../services/roomApi");
+                await upsertPlayer(roomIdStr, uidStr, myName.trim() || "Player");
               }}
             >
               Update
