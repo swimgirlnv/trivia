@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "wits-wagers-online/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "wits-wagers-online/dist"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/wits-wagers-online/dist/index.html"
+    }
+  ]
+}
