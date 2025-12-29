@@ -3,7 +3,7 @@ import { emptyStake, walletToPoints } from "../game/chips";
 import { Player, Answer, BetDoc } from "../game/types";
 import { botName } from "./botNames";
 
-const SOLO_BOT_COUNT = 5; // 👈 your “X”
+const SOLO_BOT_COUNT = 2; // 👈 your “X”
 const BOT_UID_PREFIX = "bot_";
 
 function mulberry32(seed: number) {

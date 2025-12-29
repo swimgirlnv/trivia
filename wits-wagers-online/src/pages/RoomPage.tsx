@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import "./RoomPage.css";
 import { useParams } from "react-router-dom";
 import { updateDoc } from "firebase/firestore";
 import { ensureAnonAuth, onAuth } from "../services/auth";
@@ -325,7 +326,7 @@ export function RoomPage() {
   }
 
   return (
-    <div className="roomLayout">
+    <div className="roomLayout fullWidthRoom">
       <div className="mainCol">
         <div className={`phaseBanner intent-${meta.intent}`}>
           <div className="phaseBannerTop">
@@ -516,62 +517,88 @@ export function RoomPage() {
         )}
       </div>
 
-      <div className="sideCol">
-        <div className="panel">
-          <div className="panelHeader">
-            <h3>Players</h3>
-            <span className="muted small">{players.length}/{room.settings.maxPlayers}</span>
-          </div>
+      <DrawerSideCol
+        players={players}
+        room={room}
+        uidStr={uidStr}
+        myName={myName}
+        setMyName={setMyName}
+        myAnswer={myAnswer}
+        myBetsSaved={myBetsSaved}
+        roomIdStr={roomIdStr}
+      />
+    </div>
+  );
+}
 
-          <div className="playerList">
-            {players.map((p) => (
-              <div key={p.uid} className={`playerRow ${p.uid === uidStr ? "me" : ""}`}>
-                <div className="playerName">
-                  {p.uid === room.hostUid ? "👑 " : ""}
-                  {p.isBot ? "🤖 " : ""}
-                  {p.name}
+// Collapsible Drawer for sideCol
+function DrawerSideCol({ players, room, uidStr, myName, setMyName, myAnswer, myBetsSaved, roomIdStr }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {!open && (
+        <button className="drawerFab" onClick={() => setOpen(true)} title="Open info drawer">
+          <span role="img" aria-label="Open">ℹ️</span>
+        </button>
+      )}
+      <div className={`sideColDrawer${open ? " open" : ""}`} style={{ display: open ? undefined : "none" }}>
+        <button className="drawerFab drawerFabClose" onClick={() => setOpen(false)} title="Close info drawer">
+          <span role="img" aria-label="Close">✖️</span>
+        </button>
+        <div className="drawerContent">
+          <div className="panel smallPanel">
+            <h3 style={{ marginTop: 0, fontSize: 18 }}>How to play</h3>
+            <ol className="muted small" style={{ marginTop: 0, paddingLeft: 18 }}>
+              <li>Answer a numeric question.</li>
+              <li>Answers sort onto the mat.</li>
+              <li>Place two markers; add chips from Round 2+.</li>
+              <li>Closest without going over wins (or “All too high”).</li>
+            </ol>
+          </div>
+          <div className="panel smallPanel">
+            <div className="panelHeader">
+              <h3 style={{ fontSize: 18 }}>Players</h3>
+              <span className="muted small">{players.length}/{room.settings.maxPlayers}</span>
+            </div>
+            <div className="playerList">
+              {players.map((p) => (
+                <div key={p.uid} className={`playerRow ${p.uid === uidStr ? "me" : ""}`} style={{ fontSize: 14, padding: "8px 10px" }}>
+                  <div className="playerName">
+                    {p.uid === room.hostUid ? "👑 " : ""}
+                    {p.isBot ? "🤖 " : ""}
+                    {p.name}
+                  </div>
+                  <div className="playerPts">{walletToPoints(p.wallet)} pts</div>
                 </div>
-                <div className="playerPts">{walletToPoints(p.wallet)} pts</div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-
-        <div className="panel">
-          <h3 style={{ marginTop: 0 }}>Your profile</h3>
-          <div className="ctaRow">
-            <input value={myName} onChange={(e) => setMyName(e.target.value)} />
-            <button
-              onClick={async () => {
-                localStorage.setItem(LS_NAME, myName);
-                const { upsertPlayer } = await import("../services/roomApi");
-                await upsertPlayer(roomIdStr, uidStr, myName.trim() || "Player");
-              }}
-            >
-              Update
-            </button>
+          <div className="panel smallPanel">
+            <h3 style={{ marginTop: 0, fontSize: 18 }}>Your profile</h3>
+            <div className="ctaRow">
+              <input value={myName} onChange={(e) => setMyName(e.target.value)} style={{ fontSize: 14, height: 28 }} />
+              <button
+                style={{ fontSize: 14, height: 28 }}
+                onClick={async () => {
+                  localStorage.setItem(LS_NAME, myName);
+                  const { upsertPlayer } = await import("../services/roomApi");
+                  await upsertPlayer(roomIdStr, uidStr, myName.trim() || "Player");
+                }}
+              >
+                Update
+              </button>
+            </div>
+            <div className="statusStack">
+              <span className={`statusPill ${myAnswer != null ? "ok" : ""}`} style={{ fontSize: 13 }}>
+                {myAnswer != null ? "Answer submitted ✓" : "No answer yet"}
+              </span>
+              <span className={`statusPill ${myBetsSaved ? "ok" : ""}`} style={{ fontSize: 13 }}>
+                {myBetsSaved ? "Bets saved ✓" : "No bets saved"}
+              </span>
+            </div>
           </div>
-
-          <div className="statusStack">
-            <span className={`statusPill ${myAnswer != null ? "ok" : ""}`}>
-              {myAnswer != null ? "Answer submitted ✓" : "No answer yet"}
-            </span>
-            <span className={`statusPill ${myBetsSaved ? "ok" : ""}`}>
-              {myBetsSaved ? "Bets saved ✓" : "No bets saved"}
-            </span>
-          </div>
-        </div>
-
-        <div className="panel">
-          <h3 style={{ marginTop: 0 }}>How to play</h3>
-          <ol className="muted small" style={{ marginTop: 0, paddingLeft: 18 }}>
-            <li>Answer a numeric question.</li>
-            <li>Answers sort onto the mat.</li>
-            <li>Place two markers; add chips from Round 2+.</li>
-            <li>Closest without going over wins (or “All too high”).</li>
-          </ol>
         </div>
       </div>
-    </div>
+    </>
   );
 }
