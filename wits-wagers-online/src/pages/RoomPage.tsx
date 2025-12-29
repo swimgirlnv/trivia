@@ -283,7 +283,7 @@ export function RoomPage() {
   }
 
   async function hostRevealAndPayout() {
-    if (!correctAnswer) return;
+    if (!correctAnswer || !room) return;
 
     const roundIndexNow = room.roundIndex;
     const totalRounds = room.settings.totalRounds;
