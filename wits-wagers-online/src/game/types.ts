@@ -108,3 +108,41 @@ export type Arrangement = {
   // for quick lookup: which slot a particular uid's answer ended up in (first occurrence)
   uidToSlot: Record<string, SlotId>;
 };
+
+/**
+ * 10 highly distinct colors (works great on dark backgrounds).
+ * Order is intentional: high contrast adjacency.
+ */
+const PALETTE_10 = [
+  "#4CC9F0", // cyan
+  "#F72585", // pink
+  "#B9FBC0", // mint
+  "#F9C74F", // gold
+  "#A78BFA", // violet
+  "#FB7185", // rose
+  "#34D399", // green
+  "#60A5FA", // blue
+  "#F97316", // orange
+  "#FDE047", // yellow
+] as const;
+
+/**
+ * Guaranteed unique mapping for the *current room* up to 10 players.
+ * Stable as long as the set/order of player uids is stable.
+ */
+export function getPlayerColorMap(players: Player[]) {
+  // stable ordering regardless of join timing
+  const ids = [...players].map((p) => p.uid).sort();
+  const map: Record<string, string> = {};
+  ids.forEach((uid, i) => {
+    map[uid] = PALETTE_10[i % PALETTE_10.length];
+  });
+  return map;
+}
+
+export function initials(name: string) {
+  const parts = (name || "?").trim().split(/\s+/).filter(Boolean);
+  const first = parts[0]?.[0] ?? "?";
+  const second = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
+  return (first + second).toUpperCase();
+}

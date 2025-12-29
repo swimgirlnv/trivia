@@ -135,3 +135,22 @@ export const QUESTIONS: Question[] = [
   { id: "q59", prompt: "How many dots are on a standard pair of dice (sum of pips)?", unit: "dots", answer: 42, botRange: [20, 70] },
   { id: "q60", prompt: "How many degrees Celsius is normal human body temperature (approx)?", unit: "°C", answer: 37, botRange: [30, 42] },
 ];
+
+// Utility function to shuffle questions
+export function getShuffledQuestions(): Question[] {
+  const arr = [...QUESTIONS];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Add a few more fun questions
+QUESTIONS.push(
+  { id: "q61", prompt: "How many colors are there in a rainbow?", unit: "colors", answer: 7, botRange: [5, 10] },
+  { id: "q62", prompt: "How many hearts does an octopus have?", unit: "hearts", answer: 3, botRange: [1, 6] },
+  { id: "q63", prompt: "How many time zones are there in Russia?", unit: "time zones", answer: 11, botRange: [7, 15] },
+  { id: "q64", prompt: "How many squares are there on a Rubik's Cube (one face)?", unit: "squares", answer: 9, botRange: [6, 20] },
+  { id: "q65", prompt: "How many Olympic rings are there?", unit: "rings", answer: 5, botRange: [3, 8] }
+);
